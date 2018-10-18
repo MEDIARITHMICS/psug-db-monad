@@ -7,7 +7,6 @@ import com.mediarithmics.DB.TransactionableIO.TransactionableIO
 import javax.persistence._
 
 import scala.reflect.ClassTag
-import scala.util.control.NonFatal
 
 /*
  * The DB type class interface
@@ -27,13 +26,13 @@ trait DB[F[_]] extends Effect[F] {
 
   def persist(a: Any): F[Unit]
 
-  def merge[T](a: T): F[T]
+  def merge[A](a: A): F[A]
 
   def remove[A <: EntityWithId : ClassTag](e: A): F[Unit]
 
   //  def withEntityManager[A](fa: EntityManager => A): F[A]
   //
-  //  def withEntityManagerF[A](fa: EntityManager => F[A]): F[A]
+  def withEntityManagerF[A](fa: EntityManager => F[A]): F[A]
   //
   //  def withEntityManagerIO[A](fa: EntityManager => IO[A]): F[A] = withEntityManagerF(fa andThen liftIO)
 
@@ -66,29 +65,18 @@ object DB {
     private def transactionBracket[A](em: EntityManager)
                                      (fa: EntityManager => TransactionM[M, A]): TransactionM[M, A] = {
       val acquire: TransactionM[M, EntityTransaction] =
-        for {
-          acquired <- suspend {
-            println("acquiring tx")
-            try {
-              val ts = em.getTransaction
-              ts.begin()
-              pure(ts)
-
-            }catch {
-              case NonFatal(err) =>
-                println(s"dafuk ?? ${err.getMessage}")
-                throw err
-            }
-          }
-        } yield acquired
+        delay {
+          println("acquiring tx")
+          val ts = em.getTransaction
+          ts.begin()
+          ts
+        }
 
       val use: EntityTransaction => TransactionM[M, A] =
         t =>
           Kleisli.local[M, A, TransactionState] {
-            case Some(_) =>
-              println("guess what ?")
-              throw MicsError("a transaction is already present")
-            case _ => println("using it")
+            _ =>
+              println("using it")
               Some((em, t))
           }(fa(em))
       //_ => fa(em)
@@ -100,12 +88,12 @@ object DB {
             t.commit()
             em.close()
           }
-        case (_,  ExitCase.Canceled) =>
+        case (_, ExitCase.Canceled) =>
           delay {
-//            Thread.currentThread().getStackTrace.map(println)
+            //            Thread.currentThread().getStackTrace.map(println)
             println("release - Cancel")
-//            t.rollback()
-//            em.close()
+            //            t.rollback()
+            //            em.close()
           }
         case (t, ExitCase.Error(err)) =>
           delay {
@@ -132,11 +120,10 @@ object DB {
         // remember kleisli aka ReaderT abstract a funtion of type A => F[B]
         // in our case, A = TransactionState
         // ask let us retrieve the fed parameter
-        st <- Kleisli.ask[M, TransactionState]
+        state <- Kleisli.ask[M, TransactionState]
         result <-
-          st match {
+          state match {
             case Some((em, _)) =>
-              println("already in a transaction !")
               fa(em)
             case None =>
               println("need transaction !")
@@ -147,9 +134,10 @@ object DB {
 
 
     override def findById[A: ClassTag](id: Long): TransactionM[M, A] =
-      withEntityManagerF(entityManager =>
-        Option(entityManager.find(implicitly[ClassTag[A]].runtimeClass.asInstanceOf[Class[A]], id)).map(delegate.pure[A])
-          .getOrElse(raiseError(MicsError(s"unknown ${implicitly[ClassTag[A]].runtimeClass} with id $id"))))
+      withEntityManagerF{entityManager =>
+        val clazz = implicitly[ClassTag[A]].runtimeClass.asInstanceOf[Class[A]]
+        Option(entityManager.find(clazz, id)).map(delegate.pure[A])
+          .getOrElse(raiseError(MicsError(s"unknown ${clazz.getSimpleName} with id $id")))}
 
 
     def persist(a: Any): TransactionM[M, Unit] =
