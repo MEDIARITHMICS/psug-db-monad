@@ -8,7 +8,7 @@ import javax.persistence.{EntityTransaction, EntityManager => JEM}
 
 import scala.reflect.ClassTag
 
-class DB[F[_], EM: EntityManager[F, ?]: Transactioner[F, ?]] {
+class DB[F[_], EM: EntityManager[F, ?] : Transactioner[F, ?]] {
 
   def transactionally[A](fa: => F[A]): F[A] =
     Transactioner[F, EM].transactionally(_ => fa)
@@ -84,7 +84,6 @@ object DB {
   }
 
   object Transactioner {
-    //type TransactionState[M[_]] = Option[(EntityManager[Transactionable[M, ?]], EntityTransaction)] //illegal cyclic reference, Fix ?
     type TransactionState = Option[(JEM, EntityTransaction)]
     type Transactionable[M[_], A] = Kleisli[M, TransactionState, A]
 
@@ -95,7 +94,6 @@ object DB {
 
       val acquire: Transactionable[F, EntityTransaction] =
         S.delay {
-          println("acquiring tx")
           val ts = em.getTransaction
           ts.begin()
           ts
@@ -105,28 +103,17 @@ object DB {
         t =>
           Kleisli.local[F, A, TransactionState] {
             _ => //inject state
-              println("using it")
               Some((em, t))
           }(fa(em))
 
       val release: (EntityTransaction, ExitCase[Throwable]) => Transactionable[F, Unit] = {
         case (t, ExitCase.Completed) =>
           S.delay {
-            println("release tx - success")
             t.commit()
             em.close()
           }
-        case (_, ExitCase.Canceled) =>
+        case (t, ExitCase.Canceled | ExitCase.Error(_)) =>
           S.delay {
-            //            Thread.currentThread().getStackTrace.map(println)
-            println("release - Cancel")
-            //            t.rollback()
-            //            em.close()
-          }
-        case (t, ExitCase.Error(err)) =>
-          S.delay {
-            println(err.getMessage)
-            println("release tx - failure")
             t.rollback()
             em.close()
           }
@@ -140,6 +127,7 @@ object DB {
                       (implicit S: Sync[F]): Transactioner[Transactionable[F, ?], JEM] =
       new Transactioner[Transactionable[F, ?], JEM] {
         val KS = Sync.catsKleisliSync[F, TransactionState]
+
         override def transactionally[A](fa: JEM => Transactionable[F, A]): Transactionable[F, A] =
           for {
             // remember kleisli aka ReaderT abstract a funtion of type A => F[B]
@@ -151,7 +139,6 @@ object DB {
                 case Some((em, _)) =>
                   fa(em)
                 case None =>
-                  println("need transaction !")
                   transactionBracket(getEntityManager(), fa)(KS)
               }
           } yield result

@@ -81,7 +81,8 @@ class UserControllerSpec
     val userAnswer = route(app, userRequest).get
     val createdUser = decode[User.Resource](contentAsString(userAnswer)).right.value
 
-    val group = Group.CreateRequest("psug")
+    val groupName = "lsug"
+    val group = Group.CreateRequest(groupName)
     val createGroupRequest =
       FakeRequest(POST, "/groups", headers, group.asJson.noSpaces)
     val groupAnswer = route(app, createGroupRequest).get
@@ -95,7 +96,11 @@ class UserControllerSpec
 
     val getGroups = FakeRequest(GET, s"/user/${createdUser.id}/groups")
     val getGroupsAnswer = route(app, getGroups).get
-    println(contentAsString(getGroupsAnswer))
+
+    val result = decode[List[Group.Resource]](contentAsString(getGroupsAnswer)).right.value
+
+    assert(result.size == 1)
+    assert(result.head.name == groupName)
   }
 
 
