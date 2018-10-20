@@ -1,17 +1,17 @@
 package com.mediarithmics
 
-import cats.syntax.flatMap._
+import cats.Functor
 import cats.syntax.functor._
 
 trait GroupId
 
-class GroupService[F[_]](implicit DB: DB[F]) {
+class GroupService[F[_], EM](implicit DB: DB[F, EM], F: Functor[F]) {
 
   def createGroup(name: String): F[Group] =
-    for {
-      group <- DB.delay(new Group(name))
-      _ <- DB.persist(group)
-    } yield group
+    DB.transactionally {
+      val group = new Group(name)
+      DB.persist(group).as(group)
+    }
 
 
 }
