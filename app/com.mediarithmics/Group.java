@@ -1,6 +1,7 @@
 package com.mediarithmics;
 
 import javax.persistence.*;
+import java.util.ArrayList;
 import java.util.List;
 
 @Entity
@@ -17,7 +18,7 @@ public class Group {
             name = "user_groups",
             joinColumns = @JoinColumn(name = "group_id"),
             inverseJoinColumns = @JoinColumn(name = "user_id"))
-    List<User> users;
+    List<User> users = new ArrayList<>();;
 
     public Group(String name){
         this.name = name;

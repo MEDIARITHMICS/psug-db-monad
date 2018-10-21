@@ -15,13 +15,7 @@ import com.mediarithmics.CustomModule
 import play.api.inject.guice.GuiceApplicationBuilder
 
 
-/**
-  * Add your spec here.
-  * You can mock out a whole application including requests, plugins etc.
-  *
-  * For more information, see https://www.playframework.com/documentation/latest/ScalaTestingWithScalaTest
-  */
-class UserControllerSpec
+class UserControllerIntegrationTest
   extends FunSuite
     with EitherValues
     with WsScalaTestClient
@@ -66,9 +60,9 @@ class UserControllerSpec
     val answer = route(app, request).get
 
     assert(status(answer) == OK)
-    val createdUser = decode[Group.Resource](contentAsString(answer)).right.value
-    assert(createdUser.name == group.name )
-    assert(createdUser.id != null)
+    val createdGroup = decode[Group.Resource](contentAsString(answer)).right.value
+    assert(createdGroup.name == group.name )
+    assert(createdGroup.id != null)
 
   }
 

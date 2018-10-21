@@ -1,8 +1,9 @@
 package controllers
 
 
-import cats.ApplicativeError
+import cats.{ApplicativeError, Monad}
 import cats.effect.Async
+import cats.syntax.functor._
 import com.mediarithmics._
 import com.mediarithmics.tag.TLong
 import javax.inject._
@@ -62,6 +63,23 @@ object ControllerUtils {
 
 }
 
+class UserControllerOps[F[_]: Monad, EM](userService: UserService[F, EM],
+                                          groupService: GroupService[F, EM]) {
+  def createUser(request: User.CreateRequest) : F[User.Resource] =
+    userService.createUser(request.name).map(created => User.Resource(created.getId.tag, created.getName))
+
+  def createGroup(request: Group.CreateRequest) : F[Group.Resource]=
+    groupService.createGroup(request.name).map(created => Group.Resource(created.getId.tag, created.getName))
+
+  def addUserToGroup(userId: TLong[UserId], groupId: TLong[GroupId]): F[Unit] =
+    userService.addUserToGroup(userId.tag[UserId], groupId)
+
+  def getUserGroups(userId: TLong[UserId]) : F[List[Group.Resource]] =
+    for {
+      groups <- userService.getUserGroups(userId)
+    } yield groups.map(g => Group.Resource(g.getId.tag, g.getName))
+}
+
 import ControllerUtils._
 @Singleton
 class UserController @Inject()(cc: ControllerComponents,
@@ -73,40 +91,39 @@ class UserController @Inject()(cc: ControllerComponents,
 
   implicit val A : ApplicativeError[TransactionableIO, Throwable] = Async
 
+  val ops = new UserControllerOps(userService, groupService)(Async)
+
   def createUser(): Action[AnyContent] = Action.async { r : Request[AnyContent] =>
     val doCreate = for {
       userRequestE <- Async.delay(r.bodyAs[User.CreateRequest])
       userRequest <- userRequestE.liftTo[TransactionableIO]
-      created <- userService.createUser(userRequest.name)
-      response = User.Resource(created.getId.tag, created.getName)
+      response <- ops.createUser(userRequest)
     } yield Ok( response.asJson.noSpaces )
 
     doCreate.transact.unsafeToFuture()
   }
 
-
   def createGroup(): Action[AnyContent] = Action.async {   r : Request[AnyContent] =>
     val doCreate = for {
       groupRequestE <- Async.delay(r.bodyAs[Group.CreateRequest])
       groupRequest <- groupRequestE.liftTo[TransactionableIO]
-      created <- groupService.createGroup(groupRequest.name)
-      response = Group.Resource(created.getId.tag, created.getName)
+      response <- ops.createGroup(groupRequest)
     } yield Ok( response.asJson.noSpaces )
 
     doCreate.transact.unsafeToFuture()
   }
 
   def addUserToGroup(userId: Long, groupId:Long): Action[AnyContent] = Action.async {  _ : Request[AnyContent] =>
-    userService
+    ops
       .addUserToGroup(userId.tag[UserId], groupId.tag[GroupId])
       .as(Ok(""))
       .transact.unsafeToFuture()
   }
 
   def getUserGroups(userId: Long): Action[AnyContent] = Action.async {  _ : Request[AnyContent] =>
+
     val doGet= for {
-      groups <- userService.getUserGroups(userId.tag[UserId])
-      resources = groups.map(g => Group.Resource(g.getId.tag, g.getName))
+      resources <- ops.getUserGroups(userId.tag[UserId])
     } yield Ok(resources.asJson.noSpaces)
 
     doGet.transact.unsafeToFuture()

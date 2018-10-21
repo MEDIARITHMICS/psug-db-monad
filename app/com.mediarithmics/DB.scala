@@ -102,7 +102,7 @@ object DB {
       val use: EntityTransaction => Transactionable[F, A] =
         t =>
           Kleisli.local[F, A, TransactionState] {
-            _ => //inject state
+            _ => //inject state, current state = None
               Some((em, t))
           }(fa(em))
 
@@ -112,10 +112,16 @@ object DB {
             t.commit()
             em.close()
           }
-        case (t, ExitCase.Canceled | ExitCase.Error(_)) =>
+        case (t, ExitCase.Canceled) =>
           S.delay {
             t.rollback()
             em.close()
+          }
+        case (t, ExitCase.Error(err)) =>
+          S.suspend {
+            t.rollback()
+            em.close()
+            S.raiseError(err)
           }
       }
 
@@ -133,7 +139,7 @@ object DB {
             // remember kleisli aka ReaderT abstract a funtion of type A => F[B]
             // in our case, A = TransactionState
             // ask let us retrieve the fed parameter
-            state <- Kleisli.ask[F, TransactionState]
+            state <- Kleisli.ask[F, TransactionState] //  Kleisli(F.pure)
             result <-
               state match {
                 case Some((em, _)) =>
