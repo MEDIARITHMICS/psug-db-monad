@@ -84,40 +84,42 @@ object DB {
   }
 
   object Transactioner {
-    type TransactionState = Option[(JEM, EntityTransaction)]
+    type TxContext = (JEM, EntityTransaction)
+    type TransactionState = Option[TxContext]
     type Transactionable[M[_], A] = Kleisli[M, TransactionState, A]
 
 
-    private def transactionBracket[F[_], A](em: JEM,
+    private def transactionBracket[F[_], A](getEntityManager: () => JEM,
                                             fa: JEM => Transactionable[F, A])
                                            (implicit S: Sync[Transactionable[F, ?]]): Transactionable[F, A] = {
 
-      val acquire: Transactionable[F, EntityTransaction] =
+      val acquire: Transactionable[F, TxContext] =
         S.delay {
-          val ts = em.getTransaction
-          ts.begin()
-          ts
+          val em = getEntityManager()
+          val t = em.getTransaction
+          t.begin()
+          (em, t)
         }
 
-      val use: EntityTransaction => Transactionable[F, A] =
-        t =>
+      val use: TxContext => Transactionable[F, A] = {
+        case (em, t) =>
           Kleisli.local[F, A, TransactionState] {
-            _ => //inject state, current state = None
+            _ => //set transaction, current state = None
               Some((em, t))
-          }(fa(em))
+          }(fa(em))}
 
-      val release: (EntityTransaction, ExitCase[Throwable]) => Transactionable[F, Unit] = {
-        case (t, ExitCase.Completed) =>
+      val release: (TxContext, ExitCase[Throwable]) => Transactionable[F, Unit] = {
+        case ((em, t), ExitCase.Completed) =>
           S.delay {
             t.commit()
             em.close()
           }
-        case (t, ExitCase.Canceled) =>
+        case ((em, t), ExitCase.Canceled) =>
           S.delay {
             t.rollback()
             em.close()
           }
-        case (t, ExitCase.Error(err)) =>
+        case ((em, t), ExitCase.Error(err)) =>
           S.suspend {
             t.rollback()
             em.close()
@@ -125,7 +127,7 @@ object DB {
           }
       }
 
-      S.bracketCase[EntityTransaction, A](acquire)(use)(release)
+      S.bracketCase[TxContext, A](acquire)(use)(release)
 
     }
 
@@ -145,7 +147,7 @@ object DB {
                 case Some((em, _)) =>
                   fa(em)
                 case None =>
-                  transactionBracket(getEntityManager(), fa)(KS)
+                  transactionBracket(getEntityManager, fa)(KS)
               }
           } yield result
       }

@@ -34,10 +34,10 @@ object iodb {
   }
 
 
-  def ioInstance(entityManager: () => EntityManager)
+  def ioInstance(getEntityManager: () => EntityManager)
                 (implicit contextShift: ContextShift[IO]): DB[TransactionableIO, EntityManager] = {
     implicit val tx: DB.Transactioner[Transactionable[IO, ?], EntityManager] =
-      DB.Transactioner.instance[IO](entityManager)
+      DB.Transactioner.instance[IO](getEntityManager)
     implicit val em: DB.EntityManager[Transactionable[IO, ?], EntityManager] =
       DB.EntityManager.instance(Sync.catsKleisliSync[IO, TransactionState])
 
