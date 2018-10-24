@@ -26,7 +26,7 @@ class CustomModule extends AbstractModule {
 
   @Singleton
   @Provides
-  def provideDBMonad(DBApi: DBApi): SessionFactory = {
+  def provideSessionFactory(DBApi: DBApi): SessionFactory = {
 
     val dataSource = DBApi.databases().map(_.dataSource).collect {
       case ds: HikariDataSource => ds
@@ -46,7 +46,7 @@ class CustomModule extends AbstractModule {
 
   @Singleton
   @Provides
-  def provideDBMonad(sessionFactory: SessionFactory): DB[TransactionableIO, EntityManager] =
+  def provideDB(sessionFactory: SessionFactory): DB[TransactionableIO, EntityManager] =
     ioInstance(() => sessionFactory.createEntityManager())(IOContextShift.global)
 
   @Singleton
